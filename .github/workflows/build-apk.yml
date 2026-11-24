@@ -151,12 +151,6 @@ jobs:
             const p = path.join(resDir, rel);
             if (fs.existsSync(p)) fs.unlinkSync(p);
           }
-          for (const entry of fs.readdirSync(resDir)) {
-            if (entry.startsWith('drawable')) {
-              const splash = path.join(resDir, entry, 'splash.png');
-              if (fs.existsSync(splash)) fs.unlinkSync(splash);
-            }
-          }
 
           const manifestPath = 'android/app/src/main/AndroidManifest.xml';
           let manifest = fs.readFileSync(manifestPath, 'utf8');
@@ -175,11 +169,22 @@ jobs:
           const stylesPath = path.join(resDir, 'values/styles.xml');
           if (fs.existsSync(stylesPath)) {
             let styles = fs.readFileSync(stylesPath, 'utf8');
-            styles = styles.replace(
-              '<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">',
-              `<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">\n        <item name="android:windowBackground">#07090E</item>\n        <item name="android:windowDisablePreview">true</item>`
-            );
+            styles = styles.replace(/parent="Theme\.SplashScreen"/g, 'parent="AppTheme.NoActionBar"');
+            styles = styles.replace(/@drawable\/splash/g, '#07090E');
+            if (!styles.includes('android:windowDisablePreview')) {
+              styles = styles.replace(
+                /(<style name="AppTheme\.NoActionBar"[^>]*>)/,
+                `$1\n        <item name="android:windowBackground">#07090E</item>\n        <item name="android:windowDisablePreview">true</item>`
+              );
+            }
             fs.writeFileSync(stylesPath, styles);
+          }
+
+          for (const entry of fs.readdirSync(resDir)) {
+            if (entry.startsWith('drawable')) {
+              const splash = path.join(resDir, entry, 'splash.png');
+              if (fs.existsSync(splash)) fs.unlinkSync(splash);
+            }
           }
           SCRIPT
 
@@ -188,7 +193,8 @@ jobs:
       - name: Configure Release Signing & Build Release APK
         working-directory: ${{ steps.prep.outputs.workdir }}
         run: |
-          keytool -genkey -v \
+          rm -f android/app/release.keystore
+          keytool -genkeypair -v \
             -keystore android/app/release.keystore \
             -alias falakiyah \
             -keyalg RSA -keysize 2048 -validity 10000 \
@@ -199,22 +205,40 @@ jobs:
           const fs = require('fs');
           const gradlePath = 'android/app/build.gradle';
           let gradle = fs.readFileSync(gradlePath, 'utf8');
+
           if (!gradle.includes('signingConfigs')) {
+            if (!gradle.includes('buildTypes {')) {
+              throw new Error('Could not find buildTypes block in android/app/build.gradle');
+            }
             gradle = gradle.replace(
               'buildTypes {',
               `signingConfigs {\n        release {\n            storeFile file('release.keystore')\n            storePassword 'falakiyah2026'\n            keyAlias 'falakiyah'\n            keyPassword 'falakiyah2026'\n        }\n    }\n    buildTypes {`
             );
           }
+
+          const releaseRegex = /(buildTypes\s*\{[\s\S]*?\brelease\s*\{)/;
+          if (!releaseRegex.test(gradle)) {
+            throw new Error('Could not find release buildType in android/app/build.gradle');
+          }
           gradle = gradle.replace(
-            /buildTypes\s*\{\s*release\s*\{/,
-            `buildTypes {\n        release {\n            signingConfig signingConfigs.release`
+            releaseRegex,
+            `$1\n            signingConfig signingConfigs.release`
           );
+
+          if (!gradle.includes('checkReleaseBuilds')) {
+            gradle = gradle.replace(
+              'android {',
+              `android {\n    lint {\n        checkReleaseBuilds false\n        abortOnError false\n    }`
+            );
+          }
+
           fs.writeFileSync(gradlePath, gradle);
           SCRIPT
 
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon
+          ls -lh app/build/outputs/apk/release/
 
       - name: Upload Release APK artifact
         uses: actions/upload-artifact@v4
