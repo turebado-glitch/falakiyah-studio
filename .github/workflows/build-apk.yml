@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android Release APK
 
 on:
   push:
@@ -53,38 +53,172 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
 
-      - name: Add Capacitor Android project
+      - name: Add Capacitor Android, custom compass icons & disable splash screen
         working-directory: ${{ steps.prep.outputs.workdir }}
         run: |
           if [ ! -f capacitor.config.json ]; then
-            printf '{"appId":"com.falakiyah.studio","appName":"Falakiyah Studio","webDir":"dist","bundledWebRuntime":false}\n' > capacitor.config.json
-          fi
-          npm install --no-save --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
-          npx cap add android
-          node -e '
-            const fs = require("fs");
-            const p = "android/app/src/main/AndroidManifest.xml";
-            let xml = fs.readFileSync(p, "utf8");
-            if (!xml.includes("ACCESS_FINE_LOCATION")) {
-              xml = xml.replace(
-                "<uses-permission android:name=\"android.permission.INTERNET\" />",
-                "<uses-permission android:name=\"android.permission.INTERNET\" />\n    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />\n    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />"
-              );
-              fs.writeFileSync(p, xml);
+            cat << 'EOF' > capacitor.config.json
+          {
+            "appId": "com.falakiyah.studio",
+            "appName": "Falakiyah Studio",
+            "webDir": "dist",
+            "bundledWebRuntime": false,
+            "android": {
+              "allowMixedContent": false,
+              "backgroundColor": "#07090E"
+            },
+            "plugins": {
+              "SplashScreen": {
+                "launchShowDuration": 0,
+                "launchAutoHide": true,
+                "showSpinner": false,
+                "backgroundColor": "#07090E"
+              }
             }
-          '
+          }
+          EOF
+          fi
+
+          npm install --no-save --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0 @resvg/resvg-js
+          npx cap add android
+
+          node - << 'SCRIPT'
+          const fs = require('fs');
+          const path = require('path');
+          const { Resvg } = require('@resvg/resvg-js');
+
+          const resDir = 'android/app/src/main/res';
+
+          const fullSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+            <rect width="512" height="512" fill="#07090E" />
+            <circle cx="256" cy="256" r="176" fill="none" stroke="#F59E0B" stroke-width="28" />
+            <circle cx="256" cy="256" r="142" fill="none" stroke="#F59E0B" stroke-opacity="0.25" stroke-width="6" />
+            <polygon points="346,166 298,298 166,346 214,214" fill="#F59E0B" />
+            <polygon points="346,166 298,298 256,256" fill="#FDE68A" />
+            <circle cx="256" cy="256" r="18" fill="#07090E" stroke="#FDE68A" stroke-width="8" />
+          </svg>`;
+
+          const roundSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+            <defs><clipPath id="c"><circle cx="256" cy="256" r="256" /></clipPath></defs>
+            <g clip-path="url(#c)">
+              <rect width="512" height="512" fill="#07090E" />
+              <circle cx="256" cy="256" r="176" fill="none" stroke="#F59E0B" stroke-width="28" />
+              <circle cx="256" cy="256" r="142" fill="none" stroke="#F59E0B" stroke-opacity="0.25" stroke-width="6" />
+              <polygon points="346,166 298,298 166,346 214,214" fill="#F59E0B" />
+              <polygon points="346,166 298,298 256,256" fill="#FDE68A" />
+              <circle cx="256" cy="256" r="18" fill="#07090E" stroke="#FDE68A" stroke-width="8" />
+            </g>
+          </svg>`;
+
+          const fgSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+            <g transform="translate(256,256) scale(0.66) translate(-256,-256)">
+              <circle cx="256" cy="256" r="176" fill="none" stroke="#F59E0B" stroke-width="28" />
+              <circle cx="256" cy="256" r="142" fill="none" stroke="#F59E0B" stroke-opacity="0.25" stroke-width="6" />
+              <polygon points="346,166 298,298 166,346 214,214" fill="#F59E0B" />
+              <polygon points="346,166 298,298 256,256" fill="#FDE68A" />
+              <circle cx="256" cy="256" r="18" fill="#07090E" stroke="#FDE68A" stroke-width="8" />
+            </g>
+          </svg>`;
+
+          const densities = [
+            ['mdpi', 48, 108],
+            ['hdpi', 72, 162],
+            ['xhdpi', 96, 216],
+            ['xxhdpi', 144, 324],
+            ['xxxhdpi', 192, 432],
+          ];
+
+          for (const [d, legacySize, fgSize] of densities) {
+            const dir = path.join(resDir, `mipmap-${d}`);
+            fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(path.join(dir, 'ic_launcher.png'), new Resvg(fullSvg, { fitTo: { mode: 'width', value: legacySize } }).render().asPng());
+            fs.writeFileSync(path.join(dir, 'ic_launcher_round.png'), new Resvg(roundSvg, { fitTo: { mode: 'width', value: legacySize } }).render().asPng());
+            fs.writeFileSync(path.join(dir, 'ic_launcher_foreground.png'), new Resvg(fgSvg, { fitTo: { mode: 'width', value: fgSize } }).render().asPng());
+          }
+
+          fs.mkdirSync(path.join(resDir, 'values'), { recursive: true });
+          fs.writeFileSync(
+            path.join(resDir, 'values/ic_launcher_background.xml'),
+            `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">#07090E</color>\n</resources>\n`
+          );
+
+          const adaptiveXml = `<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n    <background android:drawable="@color/ic_launcher_background"/>\n    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>\n</adaptive-icon>\n`;
+          fs.mkdirSync(path.join(resDir, 'mipmap-anydpi-v26'), { recursive: true });
+          fs.writeFileSync(path.join(resDir, 'mipmap-anydpi-v26/ic_launcher.xml'), adaptiveXml);
+          fs.writeFileSync(path.join(resDir, 'mipmap-anydpi-v26/ic_launcher_round.xml'), adaptiveXml);
+
+          for (const rel of ['drawable/ic_launcher_foreground.xml', 'drawable-v24/ic_launcher_foreground.xml']) {
+            const p = path.join(resDir, rel);
+            if (fs.existsSync(p)) fs.unlinkSync(p);
+          }
+          for (const entry of fs.readdirSync(resDir)) {
+            if (entry.startsWith('drawable')) {
+              const splash = path.join(resDir, entry, 'splash.png');
+              if (fs.existsSync(splash)) fs.unlinkSync(splash);
+            }
+          }
+
+          const manifestPath = 'android/app/src/main/AndroidManifest.xml';
+          let manifest = fs.readFileSync(manifestPath, 'utf8');
+          if (!manifest.includes('ACCESS_FINE_LOCATION')) {
+            manifest = manifest.replace(
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />'
+            );
+          }
+          manifest = manifest.replace(
+            'android:theme="@style/AppTheme.NoActionBarLaunch"',
+            'android:theme="@style/AppTheme.NoActionBar"'
+          );
+          fs.writeFileSync(manifestPath, manifest);
+
+          const stylesPath = path.join(resDir, 'values/styles.xml');
+          if (fs.existsSync(stylesPath)) {
+            let styles = fs.readFileSync(stylesPath, 'utf8');
+            styles = styles.replace(
+              '<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">',
+              `<style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">\n        <item name="android:windowBackground">#07090E</item>\n        <item name="android:windowDisablePreview">true</item>`
+            );
+            fs.writeFileSync(stylesPath, styles);
+          }
+          SCRIPT
+
           npx cap sync android
 
-      - name: Build Debug APK
+      - name: Configure Release Signing & Build Release APK
         working-directory: ${{ steps.prep.outputs.workdir }}
         run: |
+          keytool -genkey -v \
+            -keystore android/app/release.keystore \
+            -alias falakiyah \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass falakiyah2026 -keypass falakiyah2026 \
+            -dname "CN=Falakiyah Studio, OU=Falakiyah, O=Falakiyah, L=Sumenep, ST=Jawa Timur, C=ID"
+
+          node - << 'SCRIPT'
+          const fs = require('fs');
+          const gradlePath = 'android/app/build.gradle';
+          let gradle = fs.readFileSync(gradlePath, 'utf8');
+          if (!gradle.includes('signingConfigs')) {
+            gradle = gradle.replace(
+              'buildTypes {',
+              `signingConfigs {\n        release {\n            storeFile file('release.keystore')\n            storePassword 'falakiyah2026'\n            keyAlias 'falakiyah'\n            keyPassword 'falakiyah2026'\n        }\n    }\n    buildTypes {`
+            );
+          }
+          gradle = gradle.replace(
+            /buildTypes\s*\{\s*release\s*\{/,
+            `buildTypes {\n        release {\n            signingConfig signingConfigs.release`
+          );
+          fs.writeFileSync(gradlePath, gradle);
+          SCRIPT
+
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK artifact
+      - name: Upload Release APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: falakiyah-studio-debug-apk
-          path: ${{ steps.prep.outputs.workdir }}/android/app/build/outputs/apk/debug/app-debug.apk
+          name: falakiyah-studio-release-apk
+          path: ${{ steps.prep.outputs.workdir }}/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
