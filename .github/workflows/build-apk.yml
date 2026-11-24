@@ -50,7 +50,7 @@ jobs:
       - name: Install dependencies and build web app
         working-directory: ${{ steps.prep.outputs.workdir }}
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run build
 
       - name: Add Capacitor Android project
@@ -59,7 +59,7 @@ jobs:
           if [ ! -f capacitor.config.json ]; then
             printf '{"appId":"com.falakiyah.studio","appName":"Falakiyah Studio","webDir":"dist","bundledWebRuntime":false}\n' > capacitor.config.json
           fi
-          npm install --no-save @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
+          npm install --no-save --legacy-peer-deps @capacitor/core@^6.2.0 @capacitor/cli@^6.2.0 @capacitor/android@^6.2.0
           npx cap add android
           node -e '
             const fs = require("fs");
